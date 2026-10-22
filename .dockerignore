@@ -1,0 +1,14 @@
+.env
+.venv
+.git
+__pycache__
+.pytest_cache
+*.db
+logs
+local-data
+node_modules
+docs/screenshots
+.monitoring.env
+.monitoring-secrets/
+.management.env
+.fault.env
