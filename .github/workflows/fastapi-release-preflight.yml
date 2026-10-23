@@ -53,8 +53,7 @@ jobs:
               "trap 'rm -f \"$TEMP\"' EXIT",
               "printf 'services:\\n  api:\\n    image: %s\\n' \"$NEW_IMAGE\" > \"$TEMP\"",
               "docker compose -p employee-portal-p0 -f compose.yaml -f compose.ecr.yaml -f \"$TEMP\" config -q",
-              "RESOLVED=$(docker compose -p employee-portal-p0 -f compose.yaml -f compose.ecr.yaml -f \"$TEMP\" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["api"]["image"])')",
-              "test \"$RESOLVED\" = \"$NEW_IMAGE\"",
+              "docker compose -p employee-portal-p0 -f compose.yaml -f compose.ecr.yaml -f \"$TEMP\" config --images | grep -Fx -- \"$NEW_IMAGE\" >/dev/null",
               "echo RELEASE_COMPOSE_OK",
               "echo CONTAINER_UNCHANGED"
           ]
@@ -76,7 +75,7 @@ jobs:
             aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" \
               --instance-id "$INSTANCE_ID" \
-              --query '{Status:Status,Code:ResponseCode,Error:StandardErrorContent}' \
+              --query '{Status:Status,Code:ResponseCode,Output:StandardOutputContent,Error:StandardErrorContent}' \
               --output json
             exit 1
           fi
