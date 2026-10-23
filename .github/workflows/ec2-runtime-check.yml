@@ -44,6 +44,8 @@ jobs:
               "for f in /opt/schutz/employee-portal-p0/compose.ecr.yaml /opt/schutz-monitoring/compose.ecr.yaml; do if [ -f \"$f\" ]; then echo FILE_FOUND; grep -nE '^[[:space:]]*(image|build):' \"$f\" || true; fi; done",
               "echo === COMPOSE SERVICE LABELS ===",
               "docker ps --format '{{.Names}} | SERVICE={{.Label \"com.docker.compose.service\"}} | IMAGE={{.Image}}'",
+              "echo === SERVICE EC2 COMPOSE CHECK ===",
+              "if [ -f /opt/schutz/employee-portal-p0/compose.ecr.yaml ]; then cd /opt/schutz/employee-portal-p0 && docker compose -f compose.yaml -f compose.ecr.yaml config --services && docker inspect employee-portal-p0-api-1 --format 'CURRENT_IMAGE={{.Config.Image}} HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}'; else echo NOT_SERVICE_EC2; fi",
               "echo === CHECK COMPLETE ==="
           ]
           with open("ssm-params.json", "w") as f:
