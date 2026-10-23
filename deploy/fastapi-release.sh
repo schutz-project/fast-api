@@ -5,6 +5,9 @@ APP_DIR=/opt/schutz/employee-portal-p0
 CONTAINER=employee-portal-p0-api-1
 TAG="${1:-sha-8f97a8d337fb672c8c6e92bfd22ca49c2ff2dde0-39910776450-1}"
 [[ "$TAG" =~ ^sha-[a-f0-9]{40}-[0-9]+-[0-9]+$ ]] || { echo INVALID_IMAGE_TAG; exit 2; }
+ROLLBACK_TEST="${2:-NO}"
+case "$ROLLBACK_TEST" in NO|YES) ;; *) echo INVALID_ROLLBACK_TEST; exit 2 ;; esac
+rollback_test_triggered=0
 REGION=ap-northeast-2
 cd "$APP_DIR"
 exec 9>.fastapi-release.lock
@@ -25,6 +28,12 @@ trap - EXIT
 docker image inspect "$NEW_IMAGE" >/dev/null
 EXPECTED_IMAGE_ID=$(docker image inspect "$NEW_IMAGE" --format '{{.Id}}')
 OLD_IMAGE_ID=$(docker inspect "$CONTAINER" --format '{{.Image}}')
+BASELINE_API_ID=$(docker inspect "$CONTAINER" --format '{{.Id}}')
+BASELINE_NGINX_ID=$(docker inspect employee-portal-p0-nginx-1 --format '{{.Id}}')
+if [[ "$ROLLBACK_TEST" == YES && "$EXPECTED_IMAGE_ID" == "$OLD_IMAGE_ID" ]]; then
+  echo ROLLBACK_TEST_REQUIRES_DIFFERENT_IMAGE
+  exit 1
+fi
 BASELINE_DB_ID=$(docker inspect employee-portal-p0-db-1 --format '{{.Id}}')
 [[ $(docker image inspect "$OLD_IMAGE" --format '{{.Id}}') == "$OLD_IMAGE_ID" ]]
 export OLD_IMAGE
@@ -98,6 +107,16 @@ rollback() {
   if docker image inspect "$OLD_IMAGE" >/dev/null && deploy_compose; then
     if wait_health && [[ $(docker inspect "$CONTAINER" --format '{{.Image}}') == "$OLD_IMAGE_ID" ]]; then
       echo 'ROLLBACK_OK'
+      if [[ "$rollback_test_triggered" == 1 ]]; then
+        if [[ $(docker inspect "$CONTAINER" --format '{{.Config.Image}}') == "$OLD_IMAGE" &&
+              $(docker inspect "$CONTAINER" --format '{{.Id}}') != "$TEST_API_ID" &&
+              $(docker inspect employee-portal-p0-nginx-1 --format '{{.Id}}') == "$BASELINE_NGINX_ID" ]] &&
+           cmp -s "$BACKUP/compose.ecr.yaml" compose.ecr.yaml; then
+          echo FASTAPI_ROLLBACK_TEST_SUCCESS
+          exit 0
+        fi
+        echo FASTAPI_ROLLBACK_TEST_VERIFY_FAILED >&2
+      fi
     else
       echo 'ROLLBACK_HEALTH_FAILED_MANUAL_CHECK_REQUIRED' >&2
     fi
@@ -126,6 +145,15 @@ wait_health
 ACTUAL=$(docker inspect "$CONTAINER" --format '{{.Config.Image}}')
 [ "$ACTUAL" = "$NEW_IMAGE" ]
 [[ $(docker inspect "$CONTAINER" --format '{{.Image}}') == "$EXPECTED_IMAGE_ID" ]]
+if [[ "$ROLLBACK_TEST" == YES ]]; then
+  TEST_API_ID=$(docker inspect "$CONTAINER" --format '{{.Id}}')
+  [[ "$TEST_API_ID" != "$BASELINE_API_ID" ]]
+  [[ $(docker inspect employee-portal-p0-nginx-1 --format '{{.Id}}') == "$BASELINE_NGINX_ID" ]]
+  echo FASTAPI_DIFFERENT_IMAGE_VERIFIED
+  rollback_test_triggered=1
+  echo FASTAPI_ROLLBACK_TEST_TRIGGERED
+  false
+fi
 trap - ERR INT TERM
 echo 'FASTAPI_RELEASE_SUCCESS'
 echo "DEPLOYED_TAG=$TAG"
