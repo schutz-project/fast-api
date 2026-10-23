@@ -40,6 +40,8 @@ jobs:
               "docker compose ls --format json",
               "echo === RUNNING CONTAINERS ===",
               "docker ps --format '{{.Names}} | {{.Image}} | {{.Status}}'",
+              "echo === ECR COMPOSE IMAGE SETTINGS ===",
+              "for f in /opt/schutz/employee-portal-p0/compose.ecr.yaml /opt/schutz-monitoring/compose.ecr.yaml; do if [ -f \"$f\" ]; then echo FILE_FOUND; grep -nE '^[[:space:]]*(image|build):' \"$f\" || true; fi; done",
               "echo === CHECK COMPLETE ==="
           ]
           with open("ssm-params.json", "w") as f:
