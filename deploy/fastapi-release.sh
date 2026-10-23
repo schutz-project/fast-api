@@ -43,8 +43,18 @@ check_health() {
      $(docker inspect employee-portal-p0-db-1 --format '{{.Id}}' 2>/dev/null) == "$BASELINE_DB_ID" &&
      $(docker inspect employee-portal-p0-db-1 --format '{{.State.Health.Status}}' 2>/dev/null) == healthy ]] || return 1
   docker exec "$CONTAINER" python -c 'import urllib.request; assert urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=4).status == 200' >/dev/null 2>&1 || return 1
-  [[ $(curl -s -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:8080/health) == 200 &&
-     $(curl -s -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:8081/internal/check/employee) == 200 ]]
+  [[ $(curl -s -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:8080/health) == 200 ]] || return 1
+  docker exec "$CONTAINER" python -c '
+import urllib.request
+from portal.config import Settings
+request = urllib.request.Request(
+    "http://nginx:8081/internal/check/employee",
+    headers={"Authorization": "Bearer " + Settings().internal_check_token},
+)
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+with opener.open(request, timeout=5) as response:
+    assert response.status == 200
+' >/dev/null 2>&1
 }
 wait_health() {
   local passes=0
