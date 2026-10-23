@@ -7,9 +7,11 @@
   <title>Schutz · 사내 업무 포털</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
+  <style>[hidden] { display: none !important; }</style>
 </head>
 <body>
-  <section id="login-panel" class="login-screen">
+  <p id="auth-loading" role="status" style="padding:2rem;text-align:center">로그인 상태를 확인하고 있습니다…</p>
+  <section id="login-panel" class="login-screen" hidden>
     <div class="login-shell">
       <aside class="login-brand" aria-label="Schutz 가상 사내 업무 포털">
         <a class="brand-art original-logo" href="/" aria-label="Schutz 포털 첫 화면"><img src="/static/schutz-logo.png" alt="Schutz"></a>

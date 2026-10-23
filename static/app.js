@@ -23,7 +23,12 @@ function clearFieldErrors() {
   for (const id of ['username', 'password', 'name']) $(id).removeAttribute('aria-invalid');
   $('name-error').hidden = true;
 }
+function savedView() {
+  const next = location.hash.slice(1);
+  return ['home', 'search', 'notices', 'board'].includes(next) ? next : 'home';
+}
 function showUser(user) {
+  $('auth-loading').hidden = true;
   const changed = user?.user_id !== currentUser?.user_id;
   currentUser = user;
   $('login-panel').hidden = !!user;
@@ -35,7 +40,7 @@ function showUser(user) {
     $('sidebar-user-name').textContent = displayName(user);
     $('sidebar-user-id').textContent = user.username;
     $('password').value = '';
-    if (changed) { window.portalContent?.clear(); invalidateSearch(); $('name').value = ''; resetResults(); navigate('home'); }
+    if (changed) { window.portalContent?.clear(); invalidateSearch(); $('name').value = ''; resetResults(); navigate(savedView()); }
   } else {
     invalidateSearch();
     $('results').replaceChildren();
@@ -49,7 +54,9 @@ function showUser(user) {
 function navigate(next) {
   if (!currentUser || logoutBusy) return;
   if (view !== next) { invalidateSearch(); resetResults(); status(''); }
+  next = ['home', 'search', 'notices', 'board'].includes(next) ? next : 'home';
   view = next;
+  history.replaceState(history.state, '', '#' + next);
   $('home-view').hidden = next !== 'home';
   $('search-view').hidden = next !== 'search';
   $('home-nav').classList.toggle('active', next === 'home');
@@ -108,6 +115,9 @@ async function context() {
   return data;
 }
 async function startup() {
+  $('login-panel').hidden = true;
+  $('portal-panel').hidden = true;
+  $('auth-loading').hidden = false;
   $('login-button').disabled = true;
   try { const data = await context(); if (data) status(''); }
   catch (error) { csrf = null; showUser(null); $('login-button').disabled = true; status(describe(error), true, startup); }
@@ -310,7 +320,6 @@ $('logout-button').onclick = () => {
 $('account-help').onclick = () => modal('info', '가상 계정으로 이용해 주세요.', '이 포털은 실습 환경입니다.\n발급된 계정과 비밀번호는 프로젝트 담당자에게 확인해 주세요.', [{label:'확인', primary:true, run:closeDialog}], closeDialog);
 $('current-date').textContent = new Intl.DateTimeFormat('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit', weekday:'short', timeZone:'Asia/Seoul'}).format(new Date());
 window.addEventListener('pageshow', event => { if (event.persisted) { ++authGeneration; closeDialog(); csrf = null; showUser(null); startup(); } });
-startup();
 
 const contentState={generation:0,page:1,total:0,edit:null,busy:false};
 const contentNode=(tag,text,className='')=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;e.className=className;return e;};
@@ -367,3 +376,8 @@ $('post-form').onsubmit=e=>{e.preventDefault();savePost(contentState.edit?'PUT':
 $('post-cancel').onclick=clearPostForm;
 $('notices-nav').onclick=()=>navigate('notices');$('board-nav').onclick=()=>{contentState.page=1;navigate('board');};
 $('post-prev').onclick=()=>{contentState.page--;loadContent('board');};$('post-next').onclick=()=>{contentState.page++;loadContent('board');};
+
+window.addEventListener('hashchange', () => {
+  if (currentUser) navigate(savedView());
+});
+startup();
