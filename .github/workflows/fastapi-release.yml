@@ -7,8 +7,20 @@ on:
         description: "Service EC2 instance ID only"
         required: true
         type: string
+      image_tag:
+        description: "Explicit FastAPI ECR image tag"
+        required: true
+        type: string
+      rollback_test:
+        description: "YES deploys a different image then verifies rollback"
+        required: true
+        default: "NO"
+        type: choice
+        options:
+          - "NO"
+          - "YES"
       confirmation:
-        description: "Type DEPLOY to recreate the FastAPI container"
+        description: "Type DEPLOY to change the API container"
         required: true
         type: string
 
@@ -22,43 +34,76 @@ concurrency:
 
 jobs:
   release:
-    if: ${{ inputs.confirmation == 'DEPLOY' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Validate release request
+        env:
+          MODE: DEPLOY
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [[ "$MODE" == DEPLOY && "$CONFIRMATION" != DEPLOY ]]; then
+            echo 'DEPLOY_CONFIRMATION_REQUIRED'
+            exit 1
+          fi
+      - uses: actions/checkout@v6
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
           role-to-assume: arn:aws:iam::527673188566:role/schutz-github-deploy-role
           aws-region: ap-northeast-2
-      - name: Deploy FastAPI via SSM
+      - name: Check or release through SSM
         env:
           INSTANCE_ID: ${{ inputs.instance_id }}
+          MODE: DEPLOY
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          ROLLBACK_TEST: ${{ inputs.rollback_test }}
         run: |
           set -euo pipefail
-          test -f deploy/fastapi-release.sh
-          # Send script without expanding its content into GitHub logs.
-          python3 - <<'PYCODE'
-          import base64, json
+          python3 - <<'PY'
+          import base64, json, os, re, shlex
           from pathlib import Path
-          encoded = base64.b64encode(Path('deploy/fastapi-release.sh').read_bytes()).decode()
-          command = f"echo '{encoded}' | base64 -d | bash"
-          Path('ssm-params.json').write_text(json.dumps({'commands': [command]}))
-          PYCODE
+          iid=os.environ['INSTANCE_ID']
+          assert iid == 'i-09af34fe68b6c200c', 'Service instance required'
+          args=[os.environ['IMAGE_TAG'],os.environ['ROLLBACK_TEST']]
+          script=Path('deploy/fastapi-release.sh').read_bytes()
+          b64=base64.b64encode(script).decode()
+          cmd='printf %s '+shlex.quote(b64)+' | base64 -d | bash -s -- '+' '.join(map(shlex.quote,args))
+          Path('ssm-params.json').write_text(json.dumps({'commands':['set -eu',cmd], 'executionTimeout':['1200']}))
+          PY
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name AWS-RunShellScript \
             --parameters file://ssm-params.json \
             --query 'Command.CommandId' --output text)
-          if ! aws ssm wait command-executed \
-            --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"; then
-            aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-              --query '{Status:Status,Code:ResponseCode,Output:StandardOutputContent,Error:StandardErrorContent}' \
-              --output json
-            exit 1
-          fi
-          aws ssm get-command-invocation \
-            --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-            --query '{Status:Status,Output:StandardOutputContent}' --output json
+          echo "SSM_COMMAND_ID=$COMMAND_ID"
+          export COMMAND_ID
+          python3 - <<'PYWAIT'
+          import json, os, subprocess, time
+          deadline = time.monotonic() + 1260
+          while time.monotonic() < deadline:
+              p = subprocess.run(
+                  ['aws','ssm','get-command-invocation',
+                   '--command-id',os.environ['COMMAND_ID'],
+                   '--instance-id',os.environ['INSTANCE_ID'],
+                   '--output','json','--no-cli-pager'],
+                  capture_output=True, text=True, timeout=60)
+              if p.returncode:
+                  if 'InvocationDoesNotExist' not in p.stderr:
+                      raise SystemExit(p.stderr)
+              else:
+                  data = json.loads(p.stdout)
+                  status = data['Status']
+                  print('SSM_STATUS=' + status, flush=True)
+                  if status not in ('Pending','InProgress','Delayed','Cancelling'):
+                      print(data.get('StandardOutputContent',''))
+                      print(data.get('StandardErrorContent',''))
+                      output = data.get('StandardOutputContent','')
+                      marker = ('FASTAPI_ROLLBACK_TEST_SUCCESS' if os.environ['ROLLBACK_TEST'] == 'YES' else 'FASTAPI_RELEASE_SUCCESS')
+                      valid = marker in output.splitlines()
+                      if os.environ['ROLLBACK_TEST'] == 'NO':
+                          valid = valid or 'ALREADY_DEPLOYED' in output.splitlines()
+                      raise SystemExit(0 if status == 'Success' and data['ResponseCode'] == 0 and valid else 1)
+              time.sleep(10)
+          raise SystemExit('SSM_RESULT_TIMEOUT: inspect ' + os.environ['COMMAND_ID'] + ' before retrying')
+          PYWAIT
