@@ -1,0 +1,83 @@
+name: Schutz FastAPI Release Backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_id:
+        description: "Service EC2 instance ID"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::527673188566:role/schutz-github-deploy-role
+          aws-region: ap-northeast-2
+
+      - name: Save current FastAPI release
+        env:
+          INSTANCE_ID: ${{ inputs.instance_id }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PYCODE'
+          import json
+
+          commands = [
+              "set -eu",
+              "cd /opt/schutz/employee-portal-p0",
+              "test -f compose.yaml",
+              "test -f compose.ecr.yaml",
+              "OLD_IMAGE=$(docker inspect employee-portal-p0-api-1 --format '{{.Config.Image}}')",
+              "test \"$(docker inspect employee-portal-p0-api-1 --format '{{.State.Running}}')\" = true",
+              "docker image inspect \"$OLD_IMAGE\" >/dev/null",
+              "umask 077",
+              "BACKUP_ROOT=/opt/schutz/employee-portal-p0/.release-backups",
+              "mkdir -p \"$BACKUP_ROOT\"",
+              "chmod 700 \"$BACKUP_ROOT\"",
+              "BACKUP_DIR=$(mktemp -d \"$BACKUP_ROOT/fastapi-XXXXXXXX\")",
+              "cp -p compose.yaml compose.ecr.yaml \"$BACKUP_DIR/\"",
+              "printf '%s\\n' \"$OLD_IMAGE\" > \"$BACKUP_DIR/previous-image.txt\"",
+              "chmod 600 \"$BACKUP_DIR\"/*",
+              "echo RELEASE_BACKUP_OK",
+              "echo PREVIOUS_IMAGE_TAG=${OLD_IMAGE##*:}",
+              "echo BACKUP_DIRECTORY_CREATED"
+          ]
+
+          with open("ssm-params.json", "w") as f:
+              json.dump({"commands": commands}, f)
+          PYCODE
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters file://ssm-params.json \
+            --query 'Command.CommandId' \
+            --output text)
+
+          if ! aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID"; then
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query '{Status:Status,Code:ResponseCode,Error:StandardErrorContent}' \
+              --output json
+            exit 1
+          fi
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query '{Status:Status,Output:StandardOutputContent}' \
+            --output json
