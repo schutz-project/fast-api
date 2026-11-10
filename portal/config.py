@@ -21,3 +21,8 @@ class Settings(BaseSettings):
     fault_run_id: str = ''
     session_cookie_name: str = 'portal_session'
     prelogin_cookie_name: str = 'portal_prelogin'
+
+    # Separate service-control key; disabled until reviewed internal TLS routing is ready.
+    session_control_enabled: bool = False
+    session_control_secret: str = ''
+    session_control_url: str = ''

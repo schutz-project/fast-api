@@ -21,7 +21,7 @@ from portal.security import DUMMY_HASH, digest, sign, token, unknown_account, un
 from portal.telemetry import Telemetry
 
 ROOT=Path(__file__).resolve().parent.parent
-ROUTES={'/api/auth/context','/api/auth/login','/api/auth/logout','/api/employees','/health','/internal/check/employee'}
+ROUTES={'/api/auth/context','/api/auth/login','/api/auth/logout','/api/employees','/health','/internal/check/employee','/api/posts','/api/notices'}
 
 class ApiError(Exception):
     def __init__(self,status,code,message,event='request_rejected',details=None):
@@ -55,7 +55,12 @@ def create_app(settings=None,engine=None,metric_readers=None):
         request.state.obs.update(event_type=event,reason_code=reason,**fields)
 
     def error_response(request,error):
-        mark(request,error.event,error.code)
+        event = error.event
+        if error.code == 'AUTH_REQUIRED' and error.status == 401:
+            event = 'authentication_required'
+        elif error.code == 'FORBIDDEN' and error.status == 403:
+            event = 'authorization_denied'
+        mark(request,event,error.code)
         body={'error_code':error.code,'message':error.message,'request_id':request.state.obs['request_id']}
         if error.details is not None: body['details']=error.details
         response=JSONResponse(body,status_code=error.status)
@@ -81,8 +86,9 @@ def create_app(settings=None,engine=None,metric_readers=None):
         incoming=request.headers.get('x-request-id','')
         trusted=hmac.compare_digest(request.headers.get('x-proxy-key',''),settings.proxy_secret)
         rid=incoming if trusted and re.fullmatch('[a-f0-9]{32}',incoming) else uuid.uuid4().hex
+        safe_route = request.url.path if request.url.path in ROUTES else ('/api/posts/{post_id}' if re.fullmatch(r'/api/posts/[0-9]{1,12}', request.url.path) else 'other')
         state={'event_id':str(uuid.uuid4()),'service':'portal-api','environment':settings.environment,
-            'event_type':'request_completed','request_id':rid,'route':request.url.path if request.url.path in ROUTES else 'other',
+            'event_type':'request_completed','request_id':rid,'route':safe_route,'method':request.method,
             'db_duration_ms':None,'synthetic':False,'test_run_id':None,'source_ref':None,'account_ref':None,'reason_code':None,'result_count':None}
         metadata=unsign(request.headers.get('x-test-context',''),settings.test_context_secret,'test')
         if metadata and all(isinstance(metadata.get(k),str) and re.fullmatch('[A-Za-z0-9_-]{1,40}',metadata[k]) for k in ['test_run_id','source_ref']):
@@ -268,5 +274,7 @@ def create_app(settings=None,engine=None,metric_readers=None):
     app.state.settings=settings
     from portal.content import register_content
     register_content(app)
+    from portal.session_control import register_session_control
+    register_session_control(app)
     app.mount('/static',StaticFiles(directory=ROOT/'static'),name='static')
     return app

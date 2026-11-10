@@ -1,6 +1,9 @@
 # Only allowlisted paths appear in logs. Never log $request, $request_uri or $args.
 map $uri $safe_route {
     default "other";
+    ~^/api/posts/[0-9]+$ "/api/posts/{post_id}";
+    /api/posts "/api/posts";
+    /api/notices "/api/notices";
     /api/auth/context "/api/auth/context";
     /api/auth/login "/api/auth/login";
     /api/auth/logout "/api/auth/logout";
@@ -38,6 +41,14 @@ server {
     listen 8081;
     server_tokens off;
     add_header X-Request-ID $request_id always;
+    # Internal listener only; HMAC authentication is additionally required by the API.
+    location = /internal/security/revoke-test-sessions {
+        proxy_pass http://api:8000;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Proxy-Key "${PROXY_SECRET}";
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+    }
     location = /internal/check/employee {
         proxy_pass http://api:8000;
         proxy_set_header X-Request-ID $request_id;
