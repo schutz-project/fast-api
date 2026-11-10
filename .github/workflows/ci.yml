@@ -89,9 +89,19 @@ jobs:
           TEST_DATABASE_URL: postgresql+psycopg://portal_test:ci_test_password@127.0.0.1:5432/portal_test
         run: python -m pytest -q
 
+  internal-control-nginx:
+    name: Internal control Nginx TLS and ACL fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Verify isolated internal TLS, source ACL and method boundaries
+        run: python3 tests/check_internal_nginx.py
+
   publish-ecr:
     name: Publish image to ECR
-    needs: [test, docker-build, postgres-test]
+    needs: [test, docker-build, postgres-test, internal-control-nginx]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 20

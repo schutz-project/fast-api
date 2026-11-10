@@ -1,6 +1,9 @@
 # Only allowlisted paths appear in logs. Never log $request, $request_uri or $args.
 map $uri $safe_route {
     default "other";
+    ~^/api/posts/[0-9]+$ "/api/posts/{post_id}";
+    /api/posts "/api/posts";
+    /api/notices "/api/notices";
     /api/auth/context "/api/auth/context";
     /api/auth/login "/api/auth/login";
     /api/auth/logout "/api/auth/logout";

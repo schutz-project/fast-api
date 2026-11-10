@@ -1,0 +1,33 @@
+# Additional internal listener; do not replace the existing public HTTP/HTTPS servers.
+server {
+    listen 8443 ssl;
+    server_tokens off;
+    ssl_certificate /etc/nginx/session-control/service-control.crt;
+    ssl_certificate_key /etc/nginx/session-control/service-control.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    # Enforced before proxying. Requests must reach Nginx with the monitor source intact.
+    allow 10.20.20.10;
+    deny all;
+    access_log off;
+    error_log /dev/null crit;
+    client_max_body_size 8k;
+    client_body_timeout 5s;
+    location = /internal/security/health {
+        limit_except GET { deny all; }
+        # Do not use 'return 200': it could bypass the access phase and give false ACL proof.
+        proxy_pass http://api:8000/health;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Proxy-Key "${PROXY_SECRET}";
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+    }
+    location = /internal/security/revoke-test-sessions {
+        limit_except POST { deny all; }
+        proxy_pass http://api:8000;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Proxy-Key "${PROXY_SECRET}";
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+    }
+    location / { return 404; }
+}
