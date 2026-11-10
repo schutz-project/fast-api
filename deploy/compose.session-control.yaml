@@ -1,0 +1,13 @@
+# Candidate overlay for the existing employee-portal-p0 project.
+services:
+  api:
+    env_file:
+      - .session-control.env
+    environment:
+      SESSION_CONTROL_ENABLED: "false"
+  nginx:
+    ports:
+      - "10.20.10.62:18443:8443"
+    volumes:
+      - ./deploy/nginx.session-control.conf.template:/etc/nginx/templates/session-control.conf.template:ro
+      - /opt/schutz/certs/session-control:/etc/nginx/session-control:ro
